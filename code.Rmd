@@ -1,0 +1,111 @@
+```{R}
+library(dplyr)
+library(ggplot2)
+library(mgcv)
+library(Hmisc)
+library(Pmisc)
+library(astsa)
+library(tseries)
+library(forecast)
+library(GET)
+```
+
+
+```{R}
+data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
+data
+conditional_data
+GH_price
+```
+
+```{R}
+data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
+data$Price <- as.numeric(data$Price)
+
+ggplot(data, aes(x = Date, y = Price)) +
+  geom_line() +
+  labs(title = "Daily Prices", x = "Date", y = "Price")
+data
+```
+```{R}
+data <- data[order(data$Date), ]
+head(data)
+start_date <- min(data$Date)
+start_year <- as.numeric(format(start_date, "%Y"))
+start_day <- as.numeric(format(start_date, "%j"))
+price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 12)
+
+plot(price_ts, main = "Monthly Sales", ylab = "Sales", xlab = "Time")
+summary(price_ts)
+adf_result <- adf.test(price_ts)
+adf_result
+acf(price_ts, main = "ACF of Original Series")
+pacf(price_ts, main = "PACF of Original Series")
+```
+```{R}
+# degree 1
+diff_sales <- diff(price_ts, lag = 1)
+plot(diff_sales, main = "First Difference of Sales", ylab = "Diff(Sales)")
+acf(diff_sales, main = "ACF of First Differenced Series")
+pacf(diff_sales, main = "PACF of First Differenced Series")
+
+
+#degree 2
+diff_2_sales <- diff(price_ts, lag = 2)
+plot(diff_2_sales, main = "Second Difference of Sales", ylab = "Diff(Sales)")
+acf(diff_2_sales, main = "ACF of Second Differenced Series")
+pacf(diff_2_sales, main = "PACF of Second Differenced Series")
+
+arima_fit <- arima(price_ts, order = c(1,1,1))
+```
+
+
+```{R}
+
+conditional_data$DATE <- as.Date(conditional_data$DATE)
+
+conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>% group_by(DATE) %>%
+  summarise(
+    avg_PRCP = mean(PRCP, na.rm = TRUE),
+    avg_TAVG = mean(TAVG, na.rm = TRUE),
+    avg_TMAX = mean(TMAX, na.rm = TRUE),
+    avg_TMIN = mean(TMIN, na.rm = TRUE)
+  )
+conditional_data <- rename(conditional_data, Date = DATE)
+GH_price$Date <- as.Date(GH_price$Date)
+conditional_data
+GH_price
+GAM_data <- inner_join(conditional_data, GH_price, by = "Date")
+GAM_data$logMonthDays = log(Hmisc::monthDays(GAM_data$Date))
+GAM_data$dateInt = as.integer(GAM_data$Date)
+GAM_data$yearFac = factor(format(GAM_data$Date, "%Y"))
+
+
+```
+
+```{R}
+
+GH_gam <- gam(update.formula(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10) + s(yearFac, bs = "re") 
+              + avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,  Pmisc::seasonalFormula(period = 365.25,
+              harmonics = 1:2, var = "dateInt")),
+                data = GAM_data,method = "ML",
+                optimizer = "efs")
+
+summary(GH_gam)
+```
+
+```{R}
+arima_forecast <- forecast(arima_fit, h = 12)
+
+
+
+
+ 
+gam_forecast <- predict(GH_gam, newdata = newdat, type = "response")
+
+# Combine forecasts with equal weighting (or adjust weights based on performance)
+combined_forecast <- 0.5 * arima_forecast$mean + 0.5 * gam_forecast
+```
+
