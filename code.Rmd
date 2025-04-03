@@ -11,60 +11,152 @@ library(GET)
 ```
 
 
-```{R}
+```{R, base_data_in}
 data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
 conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
 GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
-data
-conditional_data
-GH_price
 ```
+
+
+# ARIMA
 
 ```{R}
 data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
+data <- subset(data, Date < as.Date("2022-01-01"))
+
 data$Price <- as.numeric(data$Price)
 
-ggplot(data, aes(x = Date, y = Price)) +
+monthly_data <- data %>% select(Date, Price)
+
+monthly_data$Date <- format(monthly_data$Date, "%m/%Y")
+
+
+monthly_data <- monthly_data %>% 
+  group_by(Date) %>% summarise(
+    Price = mean(Price, na.rm = TRUE)
+  )
+
+monthly_data$Date <- as.Date(paste("01", monthly_data$Date, sep = "/"), format = "%d/%m/%Y")
+
+year_data <- data %>% select(Date, Price)
+year_data$Date <- format(year_data$Date, "%Y")
+year_data <- year_data %>% 
+  group_by(Date) %>% summarise(
+    Price = mean(Price, na.rm = TRUE)
+  )
+year_data$Date <- as.Date(paste("01/01", year_data$Date, sep = "/"), format = "%d/%m/%Y")
+
+
+ggplot(monthly_data, aes(x = Date, y = Price)) +
   geom_line() +
   labs(title = "Daily Prices", x = "Date", y = "Price")
-data
+
+year_data <- year_data[order(year_data$Date), ]
+
+head(year_data)
 ```
-```{R}
-data <- data[order(data$Date), ]
-head(data)
+
+
+```{R, data-to-ts-data}
+
 start_date <- min(data$Date)
 start_year <- as.numeric(format(start_date, "%Y"))
 start_day <- as.numeric(format(start_date, "%j"))
-price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 12)
+price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 91.25)
 
-plot(price_ts, main = "Monthly Sales", ylab = "Sales", xlab = "Time")
+plot(price_ts, main = "cocoa price", ylab = "Sales", xlab = "Time")
 summary(price_ts)
 adf_result <- adf.test(price_ts)
 adf_result
 acf(price_ts, main = "ACF of Original Series")
 pacf(price_ts, main = "PACF of Original Series")
 ```
-```{R}
+
+```{R, differencing}
 # degree 1
 diff_sales <- diff(price_ts, lag = 1)
 plot(diff_sales, main = "First Difference of Sales", ylab = "Diff(Sales)")
 acf(diff_sales, main = "ACF of First Differenced Series")
 pacf(diff_sales, main = "PACF of First Differenced Series")
-
-
 #degree 2
 diff_2_sales <- diff(price_ts, lag = 2)
 plot(diff_2_sales, main = "Second Difference of Sales", ylab = "Diff(Sales)")
 acf(diff_2_sales, main = "ACF of Second Differenced Series")
 pacf(diff_2_sales, main = "PACF of Second Differenced Series")
 
-arima_fit <- arima(price_ts, order = c(1,1,1))
+arima_fit <- arima(price_ts, order = c(0,2,1))
+```
+
+```{r} 
+arima_forecast <- forecast(arima_fit, h = 1000)
+
+res_1 <- residuals(arima_fit)
+
+qqnorm(res_1, main = "QQ Plot: ARIMA(1,1,1)")
+qqline(res_1, col = "red")
+
+autoplot(arima_forecast)
+```
+
+```{R, month-year-data}
+
+month <- read.csv("monthly_data.csv", header = TRUE, stringsAsFactors = FALSE)
+year <- read.csv("year_data.csv", header = TRUE, stringsAsFactors = FALSE)
+year$Date <- as.Date( year$Date)
+month$Date <- as.Date(month$Date)
+
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+
+conditional_data$DATE <- as.Date(conditional_data$DATE)
+conditional_data <- rename(conditional_data, Date = DATE)
+
+
+year_data_con <- conditional_data
+month_data_con <- conditional_data
+
+year_data_con$Date <- format(year_data_con$Date, "%Y")
+month_data_con$Date <- format(month_data_con$Date, "m%Y")
+
+year_data_con <- year_data_con %>% select(Date, PRCP, TAVG, TMAX, TMIN) %>% group_by(Date) %>%
+  summarise(
+    avg_PRCP = mean(PRCP, na.rm = TRUE),
+    avg_TAVG = mean(TAVG, na.rm = TRUE),
+    avg_TMAX = mean(TMAX, na.rm = TRUE),
+    avg_TMIN = mean(TMIN, na.rm = TRUE)
+  )
+
+month_data_con <- month_data_con %>% select(Date, PRCP, TAVG, TMAX, TMIN) %>% group_by(Date) %>%
+  summarise(
+    avg_PRCP = mean(PRCP, na.rm = TRUE),
+    avg_TAVG = mean(TAVG, na.rm = TRUE),
+    avg_TMAX = mean(TMAX, na.rm = TRUE),
+    avg_TMIN = mean(TMIN, na.rm = TRUE)
+  )
+
+year_data_con$Date <- as.Date(paste("01/01", year_data_con$Date, sep = "/"), format = "%d/%m/%Y")
+year_data_full <- inner_join(year_data_con, year, by = "Date")
+
+month_data_con$Date <- as.Date(paste("01/", year_data_con$Date, sep = "/"), format = "%d/%m/%Y")
+month_data_full <- inner_join(month_data_con, month, by = "Date")
+
+write.csv(year_data_full, "year_data_full.csv", row.names = FALSE)
+write.csv(month_data_full, "month_data_full.csv", row.names = FALSE)
+
+
 ```
 
 
+# Linea models
+
 ```{R}
+price_data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+
 
 conditional_data$DATE <- as.Date(conditional_data$DATE)
+
+price_data$Date <- as.Date(price_data$Date, format = "%d/%m/%Y")
+
 
 conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>% group_by(DATE) %>%
   summarise(
@@ -73,39 +165,77 @@ conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>
     avg_TMAX = mean(TMAX, na.rm = TRUE),
     avg_TMIN = mean(TMIN, na.rm = TRUE)
   )
+
 conditional_data <- rename(conditional_data, Date = DATE)
-GH_price$Date <- as.Date(GH_price$Date)
-conditional_data
-GH_price
-GAM_data <- inner_join(conditional_data, GH_price, by = "Date")
+
+GAM_data <- inner_join(conditional_data, price_data, by = "Date")
+write.csv(GAM_data, "day_full.csv", row.names = FALSE)
+
+
 GAM_data$logMonthDays = log(Hmisc::monthDays(GAM_data$Date))
 GAM_data$dateInt = as.integer(GAM_data$Date)
 GAM_data$yearFac = factor(format(GAM_data$Date, "%Y"))
+write.csv(GAM_data, "combine.csv", row.names = FALSE)
 
+create_lags <- function(data, lags = 1:7) {
+  for (lag in lags) {
+    data[[paste0("lag_", lag)]] <- dplyr::lag(data$Price, lag)
+  }
+  return(data)
+}
+
+GAM_data_lag <- create_lags(GAM_data)
+
+train_size <- floor(0.8 * nrow(GAM_data_lag))
+train_lm <- GAM_data_lag[1:train_size, ]
+test_lm <- GAM_data_lag[(train_size + 1):nrow(GAM_data_lag), ]
 
 ```
 
 ```{R}
 
-GH_gam <- gam(update.formula(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10) + s(yearFac, bs = "re") 
-              + avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,  Pmisc::seasonalFormula(period = 365.25,
+GH_gam_1 <- gam(update.formula(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10) + s(yearFac, bs = "re") 
+              + avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,  
+              Pmisc::seasonalFormula(period = 365.25,
               harmonics = 1:2, var = "dateInt")),
-                data = GAM_data,method = "ML",
+                data = train_lm,method = "ML",
                 optimizer = "efs")
 
-summary(GH_gam)
+
+GH_gam <- gam(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10)  +  avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,
+                family = Gamma(link = "log"),
+                method = "ML",
+                data = train_lm)
+
+GH_gam_pre <- predict(GH_gam, newdata = test_lm)
+summary(GH_gam_1)
 ```
+
 
 ```{R}
-arima_forecast <- forecast(arima_fit, h = 12)
+GAM_data_lag <- GAM_data_lag %>% 
+  select(Date, Price, starts_with("lag_"))
 
 
-
-
- 
-gam_forecast <- predict(GH_gam, newdata = newdat, type = "response")
-
-# Combine forecasts with equal weighting (or adjust weights based on performance)
-combined_forecast <- 0.5 * arima_forecast$mean + 0.5 * gam_forecast
 ```
+
+
+```{R}
+### Plot Regression Predictions
+lm_results <- tibble(
+  Date = test_lm$Date,
+  Actual = test_lm$Price,
+  Predicted = GH_gam_pre
+)
+
+
+ggplot(lm_results, aes(x = Date)) +
+  geom_line(aes(y = Actual), color = "red") +
+  geom_line(aes(y = Predicted), color = "blue") +
+  labs(title = "Linear Regression Forecast vs Actual Prices", y = "Price", x = "Date") +
+  theme_minimal()
+
+```
+
+
 
