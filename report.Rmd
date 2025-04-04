@@ -2,12 +2,16 @@
 title: Cocoa Price Prediction Based on Time Series Models
 author: "Yizhuo Liu, Leo Kaixuan Cheng, Haobo Ren, Betty (Ruoran) Li"
 date: "April-04-2024"
-output: pdf_document
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+    includes:
+      in_header: preamble.tex
 subtitle: 
 date-format: long
 abstract: 
 format: pdf
-number-sections: true
 fig_caption: true
 bibliography: references.bib
 csl: apa.csl
@@ -27,14 +31,13 @@ library(zoo)
 library(tidyr)
 library(readr)
 library(knitr)
-
 knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
 ```
 
 # Introduction
-Cocoa is an important agricultural product, especially for some West African countries like Ghana and Côte d’Ivoire (). These two nations produce more than half of the world’s cocoa supply. Therefore, changes in cocoa prices have very important effects on their economies and the income of farmers. This study aims to find the key factors that influence cocoa futures prices. The primary purpose is to develop forecasting models that help predict future price movements.
+Cocoa is an important agricultural product, especially for some West African countries like Ghana and Côte d’Ivoire (@climate). These two nations produce more than half of the world’s cocoa supply. Therefore, changes in cocoa prices have very important effects on their economies and the income of farmers. This study aims to find the key factors that influence cocoa futures prices. The primary purpose is to develop forecasting models that help predict future price movements.
 
-Cocoa prices often change due to external shocks. Climate change is one major factor. Studies show that abnormal weather can harm cocoa trees and reduce production. This supply shortage often causes prices to rise sharply. For example, in Ghana and Côte d’Ivoire, rising temperatures and irregular rainfall have already created serious problems for cocoa farmers ( ). Also, inflation and changes in exchange rates can change production costs and influence market demand. When inflation increases in cocoa-importing countries or the U.S. dollar strengthens, cocoa prices become more unstable ( ). Another important factor is the disease of the cocoa trees, which are susceptible to pests and viruses, such as the swollen shoot virus. These diseases reduce the number of healthy trees, leading prices to increase due to lower production ( ). All these factors are connected and must be considered together when modeling cocoa prices.
+Cocoa prices often change due to external shocks. Climate change is one major factor. Studies show that abnormal weather can harm cocoa trees and reduce production. This supply shortage often causes prices to rise sharply. For example, in Ghana and Côte d’Ivoire, rising temperatures and irregular rainfall have already created serious problems for cocoa farmers (@climate). Also, inflation and changes in exchange rates can change production costs and influence market demand. When inflation increases in cocoa-importing countries or the U.S. dollar strengthens, cocoa prices become more unstable (@exchange). Another important factor is the disease of the cocoa trees, which are susceptible to pests and viruses, such as the swollen shoot virus. These diseases reduce the number of healthy trees, leading prices to increase due to lower production (@disease). All these factors are connected and must be considered together when modeling cocoa prices.
 
 In this report, we will use time series forecasting models, including ARIMA and linear regression with exogenous variables. These models will help identify patterns of cocoa price predictions. The analysis is based on historical data and includes climate, economic, and agricultural indicators.
 
@@ -43,7 +46,15 @@ There are some key challenges in this study. The data may be missing or incomple
 
 
 # Literature Review
+Time series forecasting has been widely used for modeling commodity prices. Classical models like ARIMA and GARCH are popular due to their simplicity. However, these models assume the linearity and stationarity of the series, which do not hold for all real-world data. An increasing number of studies have started exploring machine learning methods, which can better capture non-linear patterns of the data.
 
+A study in 2010 used univariate ARIMA models to predict cocoa bean prices (@ARIMA). The study tested ARIMA on monthly cocoa price data. It shows that ARIMA is very effective in capturing seasonality and trends. However, it cannot directly include the influence of the explanatory variables. Its performance is not very good when data is highly influenced by other factors. Our study uses ARIMA as our preliminary model, and given the problem mentioned above, we also built an ensemble model by combining the predictions from ARIMA and linear regression to improve the forecast. ARIMA captures trends and patterns over time, while linear regression focuses on relationships of cocoa prices with external variables. By averaging the predictions of these two models, the ensemble can reduce errors and balance the strengths of both approaches.
+
+As mentioned before, this study also uses a linear regression model on its own to forecast cocoa futures prices. Linear regression is simple and allows the participation of external variables. Although it may not capture complex time series, it intuitively shows how each factor influences the price directly. 
+
+Another model used in this study is ARIMAX, which extends the ARIMA model by including external variables. A recent study used ARIMAX to forecast California’s energy consumption using population, production levels, energy prices, and so on (@ARIMAX). Their results show that ARIMAX gives more accurate forecasts than ARIMA, especially when external variables highly influence the response variable. This supports the idea that adding predictors can improve model performance. In our study, ARIMAX is used to include temperature, precipitation, inflation rate and disease reports in cocoa-producing countries. This is better for modelling and forecasting real-world data than the univariate ARIMA approach.
+
+In this study, we explore a convolutional neural network (CNN) approach to forecast cocoa futures prices. CNNs are well-known in image and speech recognition, and they are increasingly used for time series forecasting. Another study proposed a WaveNet-inspired CNN model for conditional time series forecasting. Their model uses dilated convolutions to learn long-term dependencies and can make forecasts based on multiple related time series. CNN uses fewer parameters than RNNs and is faster to train (@CNN). We applied a simplified version of the temporal CNN to test whether it can capture the cocoa prices when it's affected by temperature. 
 
 # Data
 
@@ -52,13 +63,25 @@ There are some key challenges in this study. The data may be missing or incomple
 We split our data into a training set and a test set using a 80% - 20% ratio. Besides the daily price data, we extract a monthly and yearly time series data by averaging all price in one month or one year to see if our models are robust enough to train on those data. For NA and missing values in the dataset, we interpolate the data directly. 
 
 ## Preliminary Model - ARIMA
+First of all, we have chosen ARIMA to be our Preliminary model. As mentioned in the Literature Review, ARIMA seems to be one of the best models when it comes to predicting the price of Cocoa and our initial plot of cocoa price doesn’t seem to be stationary. In order for our ARIMA model to perform better, we need to find the best degree of difference and dependence order for our data. Since our data is non-stationary we apply a first difference ($d = 1$) to our data and re-assess. If the data is stationary, we continue to find the AR and MA Orders ($p$ and $q$), and if the first difference isn’t enough to make the data stationary we will introduce a second difference into our model and so on. After determining the degree of difference, we plot the Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF). A sharp cut-off in the PACF suggests the appropriate AR order ($p$) for our differenced data. And a sharp cut-off in the ACF is used to determine the MA order ($q$). Using the method above, we can find ARIMA models with appropriate degree of difference and dependence order. In general, we will write the model as
+$$\Phi(B)(1 - B)^d y_t = \Theta(B) \varepsilon_t$$
+
+where $\epsilon_t$ is the white noise sequence. In practice, we will use the function (ARIMA) in R to generate an ARIMA model for forecasting. 
+
 
 ## Model Ensemble - ARIMA + Linear Model
+As good as our time domain approach time series model might be, it lacks consideration of influencing factors in Cocoa price such as climate change, disease and exchange rate. So to compensate for the lack of factors we decided to introduce an ensemble model which not only contains an ARIMA model, but also a linear model which includes factors influencing cocoa price as predictors. We will do the same as described in our preliminary model for the ARIMA part in the ensemble model. The linear regression model is going to be a little more complicated. Naturally we choose our response variable to be the price of the Cocoa, and our predictors to be factors that influence Cocoa price the most. This will give us a general equation for our linear model.
+$$y_t=\sum_{i=1}^N\beta_i x_t^i+\epsilon$$
+where $x_i^t$ are predictors $i$ at time $t$ and $\epsilon$ is the noise. The parameters of the linear model will be fitted using least square estimation (LSE). Then we will drop predictors using p-value and T-test (with alpha value being 0.05) to reduce redundancy in our model. Last but not the least, we need to combine the 2 models, because It is hard to evaluate fairly which model should have a higher weight. We decided to use a simple average approach to the ensemble model. This give us the equation for our model:
+$$y_t=\frac{y^\text{ARIMA}_t+y^\text{LM}_t}{2}$$
+The ensemble model is useful since our linear model and ARIMA model capture different aspects of the data and we want to combine their strengths.
+
+
 
 ## ARIMAX
 The dependence of the price on other factors such as weather and diseases may be important. Therefore, we choose to use a conditional ARIMA model which is called autoregressive integrated mean average with exogenous variables (ARIMAX). It takes care of the dependence of the time series price with other time series with an expression:
 
-$$y_t=\Phi(B)(1-B)^dy_t=\Theta(B)\epsilon_t+\mathbb{\beta}^T\mathbb{x}_t$$
+$$y_t=\Phi(B)(1-B)^dy_t=\Theta(B)\epsilon_t+\mathbb{\beta}^T \boldsymbol{x}_t$$
 where $\epsilon_t$ is a white noise sequence and $x_t$ is our exogenous variable. If we expand this, we can get 
 
 $$
@@ -70,6 +93,9 @@ $$
 This is a kind of conditional ARIMA, where our time series of interest is conditioned on other variables that are potentially influential. With that, we may be able to predict the price more accurately using the other variables. In practice, we use price as the $y$ variable and we treat everything else in the dataset as the $X$ variable. The ARIMA parameters are chosen based on inspection and model selection techniques such as AIC and MSE. The model is then fitted using a standard ARIMA technique. 
 
 ## Linear Regression on Lags
+During our investigation on background information about Cocoa price, the most important factor which influenced the Cocoa price was the Cocoa price before. So we decided to introduce a linear regression model which contains the price of Cocoa leading to the prediction day. The method for building the linear regression on lags model is no different than our linear regression model in ensemble model. But this time we not only have final predictors in our ensemble model, but also price of Cocoa 1 day before to 10 days before. Then we will use the p-value and t-test again to determine which predictors to keep. The formula for this linear regression model is given by
+
+$$y_t=\sum_{t=1}^{10}\alpha_ty_t+\sum_{i=1}^N\beta_ix_t^i+\epsilon$$
 
 ## Temporal CNN
 
@@ -85,30 +111,15 @@ More specifically, we are using an encoder-decoder structure. We encode the time
 
 ## ARIMAX
 
-The ARIMAX model is fitted using daily data as well as the monthly data with parameter (10,2,1). The inference results on the monthly and daily data can be seen from the diagram below.  We can see that the result is relatively bad although we take into consideration other factors. It is similar to the results with a vanilla ARIMA model: the predicted time series becomes straight as a line, the error bar is enormous compared to the scale of the time series. The overall upward trend is correct except for the drastically increasing. This shows that the model is very uncertain on its prediction, and simply cannot fit the data because of its complexity. This suggests that ARIMAX is not a good choice for this data. 
+The ARIMAX model is fitted using daily data as well as the monthly data with parameter chosen automatically. The inference results on the monthly and daily data can be seen from the diagram below.  We can see that the result is relatively bad although we take into consideration other factors. It is similar to the results with a vanilla ARIMA model: the predicted time series becomes straight as a line, the error bar is enormous compared to the scale of the time series. The overall upward trend is correct except for the drastically increasing. This shows that the model is very uncertain on its prediction, and simply cannot fit the data because of its complexity. This suggests that ARIMAX is not a good choice for this data. 
 
-```{R}
-data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
-conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
-GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
-```
-
-```{R}
-data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
-data$Price <- as.numeric(data$Price)
-```
-
-```{R}
-data <- data[order(data$Date), ]
-start_date <- min(data$Date)
-start_year <- as.numeric(format(start_date, "%Y"))
-start_day <- as.numeric(format(start_date, "%j"))
-price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 12)
-```
+The final ARIMAX model chosen for daily data based on AIC is ARIMA(0,1,0), showing that it fits very bad on the data since the data is highly non-stationary and the bset ARIMA model even does not depend on the past. For monthly data, the model is ARIMA(0,1,1). 
 
 
 ```{R}
-day_full <- read_csv("day_full.csv", na = "0", show_col_types = FALSE)
+day_full <- read_csv("final_day_date.csv", na = "0", show_col_types = FALSE)
+day_full <- day_full %>% select(-logMonthDays, -dateInt, -yearFac, -Annual...Change)
+day_full <- day_full[order(day_full$Date), ]
 
 day_full <- day_full %>%
   mutate(across(where(is.character), ~ suppressWarnings(as.numeric(.)))) 
@@ -124,7 +135,7 @@ day_full_train <- day_full[1:split_index, ]
 day_full_test <- day_full[(split_index + 1):n, ]
 ```
 
-```{R}
+```{R, echo=FALSE}
 price_train = ts(day_full_train %>% select("Price"), frequency = 365)
 reg_clean_train = day_full_train %>%
   select(-Date, -Price) %>%
@@ -134,20 +145,13 @@ reg_clean_test = day_full_test %>%
   select(-Date, -Price) %>%
   as.matrix()
 
-model = Arima(price_train, order=c(10,2,1), xreg = reg_clean_train)
+# model = Arima(price_train, order=c(1,2,1), xreg = reg_clean_train)
+model = auto.arima(price_train, xreg = reg_clean_train)
 
-price_test <- ts(day_full_test$Price, start = end(price_train)[1] + 1, frequency = 365)
+price_test_day <- ts(day_full_test$Price, start = end(price_train)[1] + 1, frequency = 365)
 
-forecast_result = forecast(model, h = 10, xreg = reg_clean_test)
+forecast_result_day = forecast(model, h = 10, xreg = reg_clean_test)
 
-```
-
-```{R}
-#| fig-cap: ARIMAX model fitted on daily data.
-# Plot forecast vs actual
-autoplot(forecast_result) +
-  autolayer(price_test, series = "Actual") +
-  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
 ```
 
 
@@ -169,7 +173,7 @@ month_full_train <- month_full[1:split_index, ]
 month_full_test <- month_full[(split_index + 1):n, ]
 ```
 
-```{R}
+```{R, echo=FALSE}
 price_train = ts(month_full_train %>% select("Price"), frequency = 12)
 reg_clean_train = month_full_train %>%
   select(-Date, -Price) %>%
@@ -179,20 +183,31 @@ reg_clean_test = month_full_test %>%
   select(-Date, -Price) %>%
   as.matrix()
 
-model = Arima(price_train, order=c(6,2,1), xreg = reg_clean_train)
-summary(model)
+# model = Arima(price_train, order=c(6,2,1), xreg = reg_clean_train)
+# summary(model)
+model = auto.arima(price_train, xreg = reg_clean_train)
 
 price_test <- ts(month_full_test$Price, start = end(price_train)[1] + 1, frequency = 12)
 
 forecast_result = forecast(model, h = 1, xreg = reg_clean_test)
 ```
-
 ```{R}
-#| fig-cap: ARIMAX model fitted on monthly data.
+#| fig-cap: ARIMAX model fitted on daily data.
+library(gridExtra)
+
+
+par(mfrow=c(1,2)) 
 # Plot forecast vs actual
-autoplot(forecast_result) +
+p1 = autoplot(forecast_result_day) +
+  autolayer(price_test_day, series = "Actual") +
+  labs(title = "ARIMAX Forecast on Daily Data", x = "Time", y = "Price")
+
+# Plot forecast vs actual
+p2 = autoplot(forecast_result) +
   autolayer(price_test, series = "Actual") +
-  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
+  labs(title = "ARIMA Forecast on Monthly Data", x = "Time", y = "Price")
+
+grid.arrange(p1, p2, ncol = 2)
 ```
 
 
@@ -202,11 +217,13 @@ autoplot(forecast_result) +
 It takes the CNN ~1000 epochs to converge to a low loss. The fitted time series on the training and test set are shown. We can see that the model performs extremely well on the training set, showing that the expressiveness of the model is sufficient to capture the training data. We can see that the trend of the time series is correctly predicted by the CNN, but there is still some deviations from the true test set. The validation MSE loss on the test set is also large. A potential reason is that the model is too complex and it overfits the given training set even though we apply a standard $L^2$ regularization  on its weights. Overly complex model may not be suitable for a time series prediction without good regularization. The loss curve is also shown below. 
 
 ![](CNN training set.png)
+```{r fig.twoimages, echo=FALSE, fig.cap="Side-by-side comparison of image A and image B.", out.width="49%"} 
 
-```{r myimage, echo=FALSE, fig.cap="The performance of the CNN model on train set. "} knitr::include_graphics("CNN training set.png") 
+par(mfrow=c(1,2)) 
+knitr::include_graphics(c("CNN training loss.png", "CNN test loss.png")) 
 ```
 
-![The performance of the CNN model on test set. ](CNN test set.png)
+
 # Discussion
 Overall the traditional time series prediction methods all perform relatively bad on the cocoa global price dataset. This shows that this data has an inherently complex nature, and many models are bad at capturing the pattern of the data. Another factor that may be problematic is the stationarity of the time series, which is hard to achieve. Also, traditional models such as ARIMA may fail because they don’t take into consideration the exogenous variables such as weather and inflation. To resolve this, we found that the linear model trained on lags achieved a satisfying performance on both the training set and the generalization to the test set. Theoretically, temporal CNN will also perform well on this the performance of the linear model. However, due to issues like overfitting, the CNN model is not good as the linear model when predicting the future. 
 
@@ -217,3 +234,5 @@ Data quality may also be important. We may incorporate more relevant data to tra
 Recently there are works on utilizing diffusion models for time series prediction [@diffusion], which achieve state-of-the-art performance. Using that, we may be able to fit a robust and well-generalized model on this complex dataset conditioned on other factors. The flexibility of the proposed model enables us to do that.
 
 # Conclusion
+
+# Reference
