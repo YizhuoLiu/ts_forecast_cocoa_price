@@ -22,7 +22,6 @@ GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
 
 ```{R}
 data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
-data <- subset(data, Date < as.Date("2022-01-01"))
 
 data$Price <- as.numeric(data$Price)
 
@@ -50,6 +49,9 @@ year_data$Date <- as.Date(paste("01/01", year_data$Date, sep = "/"), format = "%
 ggplot(monthly_data, aes(x = Date, y = Price)) +
   geom_line() +
   labs(title = "Daily Prices", x = "Date", y = "Price")
+
+write.csv(year_data, "year_data.csv", row.names = FALSE)
+write.csv(monthly_data, "monthly_data.csv", row.names = FALSE)
 
 year_data <- year_data[order(year_data$Date), ]
 
@@ -84,7 +86,7 @@ plot(diff_2_sales, main = "Second Difference of Sales", ylab = "Diff(Sales)")
 acf(diff_2_sales, main = "ACF of Second Differenced Series")
 pacf(diff_2_sales, main = "PACF of Second Differenced Series")
 
-arima_fit <- arima(price_ts, order = c(0,2,1))
+arima_fit <- arima(price_ts, order = c(0,1,69))
 ```
 
 ```{r} 
@@ -115,7 +117,7 @@ year_data_con <- conditional_data
 month_data_con <- conditional_data
 
 year_data_con$Date <- format(year_data_con$Date, "%Y")
-month_data_con$Date <- format(month_data_con$Date, "m%Y")
+month_data_con$Date <- format(month_data_con$Date, "%m/%Y")
 
 year_data_con <- year_data_con %>% select(Date, PRCP, TAVG, TMAX, TMIN) %>% group_by(Date) %>%
   summarise(
@@ -136,7 +138,7 @@ month_data_con <- month_data_con %>% select(Date, PRCP, TAVG, TMAX, TMIN) %>% gr
 year_data_con$Date <- as.Date(paste("01/01", year_data_con$Date, sep = "/"), format = "%d/%m/%Y")
 year_data_full <- inner_join(year_data_con, year, by = "Date")
 
-month_data_con$Date <- as.Date(paste("01/", year_data_con$Date, sep = "/"), format = "%d/%m/%Y")
+month_data_con$Date <- as.Date(paste("01", month_data_con$Date, sep = "/"), format = "%d/%m/%Y")
 month_data_full <- inner_join(month_data_con, month, by = "Date")
 
 write.csv(year_data_full, "year_data_full.csv", row.names = FALSE)
@@ -213,21 +215,39 @@ summary(GH_gam_1)
 
 
 ```{R}
-GAM_data_lag <- GAM_data_lag %>% 
-  select(Date, Price, starts_with("lag_"))
+GAM_data_lag_1 <- GAM_data_lag %>% 
+  select(Date, Price, starts_with("lag_"), dateInt)
 
+
+train_size <- floor(0.8 * nrow(GAM_data_lag_1))
+train_lm <- GAM_data_lag_1[1:train_size, ]
+test_lm <- GAM_data_lag_1[(train_size + 1):nrow(GAM_data_lag_1), ]
+
+lm_model <- gam(Price ~ lag_1 + lag_2 + lag_3 +lag_4 + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10), 
+                family = Gamma(link = "log"),
+                method = "ML",
+                data = train_lm )
+lm_pre <- predict(lm_model, newdata = test_lm, type = "response")
 
 ```
 
 
+
 ```{R}
+
+
+head(lm_pre)
+head(test_lm)
 ### Plot Regression Predictions
 lm_results <- tibble(
   Date = test_lm$Date,
   Actual = test_lm$Price,
-  Predicted = GH_gam_pre
+  Predicted = lm_pre
 )
 
+lm_rmse <- sqrt(mean((lm_results$Actual - lm_results$Predicted)^2))
+
+lm_rmse
 
 ggplot(lm_results, aes(x = Date)) +
   geom_line(aes(y = Actual), color = "red") +
