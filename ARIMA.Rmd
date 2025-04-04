@@ -1,0 +1,148 @@
+---
+title: "ARIMA"
+output: html_document
+---
+
+```{R}
+library(dplyr)
+library(ggplot2)
+library(mgcv)
+library(Hmisc)
+library(Pmisc)
+library(astsa)
+library(tseries)
+library(forecast)
+library(GET)
+library(zoo)
+library(tidyr)
+library(readr)
+```
+
+
+```{R}
+data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
+data
+conditional_data
+GH_price
+```
+
+```{R}
+data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
+data$Price <- as.numeric(data$Price)
+
+ggplot(data, aes(x = Date, y = Price)) +
+  geom_line() +
+  labs(title = "Daily Prices", x = "Date", y = "Price")
+data
+```
+
+```{R}
+data <- data[order(data$Date), ]
+head(data)
+start_date <- min(data$Date)
+start_year <- as.numeric(format(start_date, "%Y"))
+start_day <- as.numeric(format(start_date, "%j"))
+price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 12)
+
+plot(price_ts, main = "Monthly Sales", ylab = "Sales", xlab = "Time")
+summary(price_ts)
+adf_result <- adf.test(price_ts)
+adf_result
+acf(price_ts, main = "ACF of Original Series")
+pacf(price_ts, main = "PACF of Original Series")
+```
+
+
+```{R}
+day_full <- read_csv("day_full.csv", na = "0")
+
+day_full <- day_full %>%
+  mutate(across(where(is.character), ~ as.numeric(.)))
+
+day_full <- day_full %>%
+  arrange(Date) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+day_full
+ggplot(day_full, aes(x = Date, y = Price)) +
+  geom_line() +
+  labs(title = "Daily Prices", x = "Date", y = "Price")
+```
+```{R}
+n <- nrow(day_full)
+split_index <- floor(0.8 * n)
+
+day_full_train <- day_full[1:split_index, ]
+day_full_test <- day_full[(split_index + 1):n, ]
+```
+
+```{R}
+price_train = ts(day_full_train %>% select("Price"), frequency = 365)
+reg_clean_train = day_full_train %>%
+  select(-Date, -Price) %>%
+  as.matrix()
+
+reg_clean_test = day_full_test %>%
+  select(-Date, -Price) %>%
+  as.matrix()
+
+model = Arima(price_train, order=c(10,2,1), xreg = reg_clean_train)
+summary(model)
+
+price_test <- ts(day_full_test$Price, start = end(price_train)[1] + 1, frequency = 365)
+
+forecast_result = forecast(model, h = 10, xreg = reg_clean_test)
+
+# Plot forecast vs actual
+autoplot(forecast_result) +
+  autolayer(price_test, series = "Actual") +
+  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
+```
+
+
+```{R}
+month_full <- read_csv("month_data_full.csv")
+
+month_full <- month_full %>%
+  mutate(across(where(is.character), ~ as.numeric(.)))
+
+month_full <- month_full %>%
+  arrange(Date) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+month_full
+ggplot(month_full, aes(x = Date, y = Price)) +
+  geom_line() +
+  labs(title = "Daily Prices", x = "Date", y = "Price")
+```
+```{R}
+n <- nrow(month_full)
+split_index <- floor(0.8 * n)
+
+month_full_train <- month_full[1:split_index, ]
+month_full_test <- month_full[(split_index + 1):n, ]
+```
+
+```{R}
+price_train = ts(month_full_train %>% select("Price"), frequency = 12)
+reg_clean_train = month_full_train %>%
+  select(-Date, -Price) %>%
+  as.matrix()
+
+reg_clean_test = month_full_test %>%
+  select(-Date, -Price) %>%
+  as.matrix()
+
+model = Arima(price_train, order=c(6,2,1), xreg = reg_clean_train)
+summary(model)
+
+price_test <- ts(month_full_test$Price, start = end(price_train)[1] + 1, frequency = 12)
+
+forecast_result = forecast(model, h = 1, xreg = reg_clean_test)
+# Plot forecast vs actual
+autoplot(forecast_result) +
+  autolayer(price_test, series = "Actual") +
+  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
+```
