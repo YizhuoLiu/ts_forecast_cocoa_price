@@ -8,6 +8,11 @@ library(astsa)
 library(tseries)
 library(forecast)
 library(GET)
+library(zoo)
+library(tidyr)
+library(readr)
+library(lubridate)
+
 ```
 
 
@@ -53,20 +58,30 @@ ggplot(monthly_data, aes(x = Date, y = Price)) +
 write.csv(year_data, "year_data.csv", row.names = FALSE)
 write.csv(monthly_data, "monthly_data.csv", row.names = FALSE)
 
-year_data <- year_data[order(year_data$Date), ]
+data <- data[order(data$Date), ]
 
-head(year_data)
+head(data)
 ```
 
 
 ```{R, data-to-ts-data}
+n <- nrow(data)
+split_index <- floor(0.8 * n)
 
-start_date <- min(data$Date)
+day_full_train <- data[1:split_index, ]
+day_full_test <- data[(split_index + 1):n, ]
+
+
+
+
+start_date <- min(day_full_train$Date)
 start_year <- as.numeric(format(start_date, "%Y"))
 start_day <- as.numeric(format(start_date, "%j"))
-price_ts <- ts(data$Price, start = c(start_year, start_day), frequency = 91.25)
+price_ts <- ts(day_full_train$Price, start = c(start_year, start_day), frequency = 91.25)
 
-plot(price_ts, main = "cocoa price", ylab = "Sales", xlab = "Time")
+price_test <- ts(day_full_test$Price, start = end(price_ts)[1] + 1, frequency = 91.25)
+
+autoplot(price_ts, main = "cocoa price", ylab = "Sales", xlab = "Time")
 summary(price_ts)
 adf_result <- adf.test(price_ts)
 adf_result
@@ -86,18 +101,22 @@ plot(diff_2_sales, main = "Second Difference of Sales", ylab = "Diff(Sales)")
 acf(diff_2_sales, main = "ACF of Second Differenced Series")
 pacf(diff_2_sales, main = "PACF of Second Differenced Series")
 
-arima_fit <- arima(price_ts, order = c(0,1,69))
+arima_fit <- arima(price_ts, order = c(0,1,1))
 ```
 
 ```{r} 
-arima_forecast <- forecast(arima_fit, h = 1000)
+arima_forecast <- forecast(arima_fit, h = 1700)
 
 res_1 <- residuals(arima_fit)
 
 qqnorm(res_1, main = "QQ Plot: ARIMA(1,1,1)")
 qqline(res_1, col = "red")
 
-autoplot(arima_forecast)
+
+autoplot(arima_forecast) +
+  autolayer(price_test, series = "Actual") +
+  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
+
 ```
 
 ```{R, month-year-data}
@@ -143,22 +162,58 @@ month_data_full <- inner_join(month_data_con, month, by = "Date")
 
 write.csv(year_data_full, "year_data_full.csv", row.names = FALSE)
 write.csv(month_data_full, "month_data_full.csv", row.names = FALSE)
+```
+
+
+# Linea models
+```{R}
+month_mapping <- data.frame(
+  MonthAbbr = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+  diseases = c(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 9.5, 14.5, 11.0, 0.0, 0.0)
+)
+
+daily_seq <- data.frame(
+  Date = seq.Date(from = as.Date("1994-01-01"),
+                  to   = as.Date("2024-12-31"),
+                  by   = "day")
+)
+
+daily_diseases <- daily_seq %>%
+  mutate(MonthAbbr = month(Date, label = TRUE, abbr = TRUE) %>% as.character()) %>%
+  left_join(month_mapping, by = "MonthAbbr") %>%
+  select(Date, diseases)
 
 
 ```
 
 
-# Linea models
-
 ```{R}
 price_data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
 conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+reg_temp <- read.csv("region_temp.csv", header = TRUE)
+inflation <- read.csv("inflation.csv", header = TRUE)
 
+reg_temp$Date <- as.Date(reg_temp$Date)
 
 conditional_data$DATE <- as.Date(conditional_data$DATE)
 
 price_data$Date <- as.Date(price_data$Date, format = "%d/%m/%Y")
 
+inflation$Date <- as.Date(inflation$Date)
+
+inflation <- inflation %>%
+  mutate(Year = year(Date))
+
+daily_seq <- data.frame(
+  Date = seq(from = as.Date("1994-01-01"),
+             to   = as.Date("2024-12-31"),
+             by   = "day")
+) %>%
+  mutate(Year = year(Date))
+
+inflation_daily <- daily_seq %>%
+  left_join(inflation %>% select(-Date), by = "Year")
 
 conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>% group_by(DATE) %>%
   summarise(
@@ -170,14 +225,39 @@ conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>
 
 conditional_data <- rename(conditional_data, Date = DATE)
 
-GAM_data <- inner_join(conditional_data, price_data, by = "Date")
-write.csv(GAM_data, "day_full.csv", row.names = FALSE)
+mid_join <- inner_join(conditional_data, price_data, by = "Date")
 
+mid_join_1 <- left_join(mid_join, inflation_daily, by = "Date")
+
+mid_join_2 <- left_join(mid_join_1, daily_diseases, by = "Date")
+
+GAM_data <- left_join(mid_join_2, reg_temp)
 
 GAM_data$logMonthDays = log(Hmisc::monthDays(GAM_data$Date))
 GAM_data$dateInt = as.integer(GAM_data$Date)
 GAM_data$yearFac = factor(format(GAM_data$Date, "%Y"))
-write.csv(GAM_data, "combine.csv", row.names = FALSE)
+
+GAM_data <- GAM_data %>%
+  arrange(avg_PRCP) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TAVG) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TMAX) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TMIN) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+write.csv(GAM_data, "final_day_date.csv",row.names = FALSE)
+
+```
+
+```{R, lag}
 
 create_lags <- function(data, lags = 1:7) {
   for (lag in lags) {
@@ -187,48 +267,52 @@ create_lags <- function(data, lags = 1:7) {
 }
 
 GAM_data_lag <- create_lags(GAM_data)
-
 train_size <- floor(0.8 * nrow(GAM_data_lag))
 train_lm <- GAM_data_lag[1:train_size, ]
 test_lm <- GAM_data_lag[(train_size + 1):nrow(GAM_data_lag), ]
-
+test_lm
 ```
 
 ```{R}
 
-GH_gam_1 <- gam(update.formula(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10) + s(yearFac, bs = "re") 
-              + avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,  
-              Pmisc::seasonalFormula(period = 365.25,
-              harmonics = 1:2, var = "dateInt")),
-                data = train_lm,method = "ML",
-                optimizer = "efs")
+lm_model <- lm(Price ~ avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN + Inflation + diseases +Reg_temp, data = train_lm)
 
+summary(lm_model)
+lm_model <- lm(Price ~ avg_PRCP + avg_TAVG  + avg_TMIN + Inflation + diseases +Reg_temp, data = train_lm)
 
-GH_gam <- gam(Price ~ offset(logMonthDays) + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10)  +  avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN,
-                family = Gamma(link = "log"),
-                method = "ML",
-                data = train_lm)
+lm_model_pre <- predict(lm_model, newdata = test_lm, type = "response")
 
-GH_gam_pre <- predict(GH_gam, newdata = test_lm)
-summary(GH_gam_1)
+lm_results <- tibble(
+  Date = test_lm$Date,
+  Actual = test_lm$Price,
+  Predicted = lm_model_pre
+)
+
+lm_rmse <- sqrt(mean((lm_results$Actual - lm_results$Predicted)^2))
+
+lm_rmse
+
+ggplot(lm_results, aes(x = Date)) +
+  geom_line(aes(y = Actual), color = "red") +
+  geom_line(aes(y = Predicted), color = "blue") +
+  labs(title = "Linear Regression Forecast vs Actual Prices", y = "Price", x = "Date") +
+  theme_minimal()
+
 ```
 
 
 ```{R}
-GAM_data_lag_1 <- GAM_data_lag %>% 
-  select(Date, Price, starts_with("lag_"), dateInt)
+GAM_data_lag_1 <- train_lm %>% 
+  select(Date, Price, starts_with("lag_"), dateInt,avg_PRCP , avg_TAVG , avg_TMAX , avg_TMIN)
 
 
 train_size <- floor(0.8 * nrow(GAM_data_lag_1))
 train_lm <- GAM_data_lag_1[1:train_size, ]
 test_lm <- GAM_data_lag_1[(train_size + 1):nrow(GAM_data_lag_1), ]
 
-lm_model <- gam(Price ~ lag_1 + lag_2 + lag_3 +lag_4 + s(dateInt, pc = as.integer(as.Date("1990/7/1")),k = 10), 
-                family = Gamma(link = "log"),
-                method = "ML",
-                data = train_lm )
-lm_pre <- predict(lm_model, newdata = test_lm, type = "response")
+lm_model_lag <- lm(Price ~ lag_1 + lag_2 + lag_3 +lag_4 + avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN, data = train_lm)
 
+lm_pre_lag <- predict(lm_model, newdata = test_lm, type = "response")
 ```
 
 
