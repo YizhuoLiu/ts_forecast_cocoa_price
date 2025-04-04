@@ -30,6 +30,7 @@ library(GET)
 library(zoo)
 library(tidyr)
 library(readr)
+library(lubridate)
 library(knitr)
 knitr::opts_chunk$set(fig.pos = 'H', echo = FALSE, message = FALSE, warning = FALSE)
 ```
@@ -105,9 +106,235 @@ More specifically, we are using an encoder-decoder structure. We encode the time
 
 
 # Results and Forecasting
+
+```{R, include = FALSE}
+data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+GH_price <- read.csv("USD_GHS Historical Data.csv", header = TRUE)
+
+data$Date <- as.Date(data$Date, format = "%d/%m/%Y")
+
+data$Price <- as.numeric(data$Price)
+
+data <- data[order(data$Date), ]
+
+n <- nrow(data)
+split_index <- floor(0.8 * n)
+
+day_full_train <- data[1:split_index, ]
+day_full_test <- data[(split_index + 1):n, ]
+
+
+start_date <- min(day_full_train$Date)
+start_year <- as.numeric(format(start_date, "%Y"))
+start_day <- as.numeric(format(start_date, "%j"))
+price_ts <- ts(day_full_train$Price, start = c(start_year, start_day), frequency = 30.5)
+
+price_test <- ts(day_full_test$Price, start = end(price_ts)[1], frequency = 30.5)
+
+```
 ## Preliminary Model
+From the figure we can the data after first differencing. After the first difference the data look closer to a Gaussian Noise and with a relatively constant mean, the variance also isn't changing as much with any obvious trend, therefore no heteroskedasticity issues. But, looking at the PACF of first difference data, there is no obvious cut-off suggesting a second cut-off is needed. Therefore, we decided to do a second differentiation to our data. After second differencing the data still looks stationary. Now we need to determine the order of MA(q) and AR(p).
+
+```{R, echo = FALSE, fig.width=3, fig.height=5}
+diff_sales <- diff(price_ts, lag = 1)
+diff_2_sales <- diff(price_ts, lag = 2)
+
+
+par(mfrow = c(3, 1))
+
+plot(diff_sales, main = "First Difference of Sales", ylab = "Diff(Sales)")
+
+acf(diff_sales, main = "ACF of First Differenced Series")
+
+pacf(diff_sales, main = "PACF of First Differenced Series")
+
+diff_2_sales <- diff(price_ts, lag = 2)
+
+plot(diff_2_sales, main = "Second Difference of Sales", ylab = "Diff(Sales)")
+acf(diff_2_sales, main = "ACF of Second Differenced Series")
+pacf(diff_2_sales, main = "PACF of Second Differenced Series")
+
+arima_fit <- arima(price_ts, order = c(0,2,1))
+
+```
+
+For the PACF graph, there is a cutoff right before lag = 1 and a decreasing trend; all PACF values after lag one are close to 0. The same could not be said for the ACF plot,  there is a cutoff right after lag = 0 . This suggests that, AR order should be 0 and MA order should be 1.
+This leads to the following equation:
+
+$$$$
+
+After deciding on the dependence orders and degree of differencing, we first train our ARIMA model using the training dataset. Then use the “forecast” function in R to forecast Cocoa price based on our ARIMA(0,2,1) model. And we set our forecasting length to be the length of our testing dataset. This gives us a figure  - plot of our forecasting data and actual real world data. 
+
+```{r, echo = FALSE, fig.width=10, fig.height=5} 
+arima_forecast <- forecast(arima_fit, h = 1700)
+
+autoplot(arima_forecast) +
+  autolayer(price_test, series = "Actual") +
+  labs(title = "ARIMA Forecast vs Actual", x = "Time", y = "Price")
+
+```
+
+The plot of our predicted value is a straight line, without any obvious seasonal change. Also, as shown in figure there is a great difference between actual data and our predicted data suggesting the MSE for our model is going to be big and our model performed poorly. Our AIC calculation backs this up, using the “summary” function in R, we got an AIC value of 61719.06. The preliminary model isn’t very complex, so it doesn’t get penalized by having many parameters. This large value of AIC might  indicate that our preliminary model has more information loss compared to other candidate models, but we will have to wait and see how the other model performs. 
 
 ## Model Ensemble - ARIMA + Linear Model
+
+```{R, include = FALSE}
+month_mapping <- data.frame(
+  MonthAbbr = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+  diseases = c(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 9.5, 14.5, 11.0, 0.0, 0.0)
+)
+
+daily_seq <- data.frame(
+  Date = seq.Date(from = as.Date("1994-01-01"),
+                  to   = as.Date("2024-12-31"),
+                  by   = "day")
+)
+
+daily_diseases <- daily_seq %>%
+  mutate(MonthAbbr = month(Date, label = TRUE, abbr = TRUE) %>% as.character()) %>%
+  left_join(month_mapping, by = "MonthAbbr") %>%
+  select(Date, diseases)
+price_data <- read.csv("Prices.csv", header = TRUE, stringsAsFactors = FALSE)
+conditional_data <- read.csv("Ghana_data.csv", header = TRUE)
+reg_temp <- read.csv("region_temp.csv", header = TRUE)
+inflation <- read.csv("inflation.csv", header = TRUE)
+
+reg_temp$Date <- as.Date(reg_temp$Date)
+
+conditional_data$DATE <- as.Date(conditional_data$DATE)
+
+price_data$Date <- as.Date(price_data$Date, format = "%d/%m/%Y")
+
+inflation$Date <- as.Date(inflation$Date)
+
+inflation <- inflation %>%
+  mutate(Year = year(Date))
+
+daily_seq <- data.frame(
+  Date = seq(from = as.Date("1994-01-01"),
+             to   = as.Date("2024-12-31"),
+             by   = "day")
+) %>%
+  mutate(Year = year(Date))
+
+inflation_daily <- daily_seq %>%
+  left_join(inflation %>% select(-Date), by = "Year")
+
+conditional_data <- conditional_data %>% select(DATE, PRCP, TAVG, TMAX, TMIN) %>% group_by(DATE) %>%
+  summarise(
+    avg_PRCP = mean(PRCP, na.rm = TRUE),
+    avg_TAVG = mean(TAVG, na.rm = TRUE),
+    avg_TMAX = mean(TMAX, na.rm = TRUE),
+    avg_TMIN = mean(TMIN, na.rm = TRUE)
+  )
+
+conditional_data <- rename(conditional_data, Date = DATE)
+
+mid_join <- inner_join(conditional_data, price_data, by = "Date")
+
+mid_join_1 <- left_join(mid_join, inflation_daily, by = "Date")
+
+mid_join_2 <- left_join(mid_join_1, daily_diseases, by = "Date")
+
+GAM_data <- left_join(mid_join_2, reg_temp)
+
+GAM_data$logMonthDays = log(Hmisc::monthDays(GAM_data$Date))
+GAM_data$dateInt = as.integer(GAM_data$Date)
+GAM_data$yearFac = factor(format(GAM_data$Date, "%Y"))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_PRCP) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TAVG) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TMAX) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+GAM_data <- GAM_data %>%
+  arrange(avg_TMIN) %>%
+  mutate(across(where(is.numeric), ~ na.approx(., na.rm = FALSE)))
+
+
+```
+
+The ARIMA part of our ensemble model is going to be ARIMA(0,2,1) just like the preliminary model. As mentioned in the literature review, some of the most influential factors for Cocoa price are climate change(temperature -average, max and min ,and precipitation), inflation and diseases. Therefore, these are the factors we choose for our linear regression model. By using the “lm” function in R we are able to produce the linear regression model. Then we calculate p value for all of the predictors. (figure) , based on the figure and our alpha value being 0.05, we decided to drop the predictor maximum temperature.
+
+```{R, lag, include = FALSE}
+create_lags <- function(data, lags = 1:7) {
+  for (lag in lags) {
+    data[[paste0("lag_", lag)]] <- dplyr::lag(data$Price, lag)
+  }
+  return(data)
+}
+GAM_data <- GAM_data[order(GAM_data$Date), ]
+
+GAM_data_lag <- create_lags(GAM_data)
+train_size <- floor(0.8 * nrow(GAM_data_lag))
+train_lm <- GAM_data_lag[1:train_size, ]
+test_lm <- GAM_data_lag[(train_size + 1):nrow(GAM_data_lag), ]
+
+train_ts <- train_lm %>% select(Date, Price)
+test_ts <- test_lm %>% select(Date, Price)
+
+train_ts$Date <- as.Date(train_lm$Date)
+test_ts$Date <- as.Date(test_ts$Date)
+
+train_ts <- train_ts[order(train_ts$Date), ]
+test_ts <- test_ts[order(test_ts$Date), ]
+
+
+start_year <- as.numeric(format(train_ts$Date[1], "%Y"))
+start_day <- as.numeric(format(train_ts$Date[1], "%j"))
+
+train_ts <- ts(train_ts$Price, frequency = 91.5)
+
+start_year <- as.numeric(format(test_ts$Date[1], "%Y"))
+start_day <- as.numeric(format(test_ts$Date[1], "%j"))
+test_ts <- ts(test_ts$Price, frequency = 91.5)
+
+```
+
+```{R, include = FALSE}
+
+lm_model <- lm(Price ~ avg_PRCP + avg_TAVG + avg_TMAX + avg_TMIN + Inflation + diseases +Reg_temp, data = train_lm)
+
+lm_model <- lm(Price ~ avg_PRCP + avg_TAVG  + avg_TMIN + Inflation + diseases +Reg_temp, data = train_lm)
+
+lm_model_pre <- predict(lm_model, newdata = test_lm, type = "response")
+
+```
+
+After getting the ARIMA and linear regression model we desired, we can now produce the ensemble model using the formula in the method section. Then we can forecast Cocoa price using our ensemble model on the testing dataset, this gives the figure . Looking at the graph below we see that there is a seasonal trend in our forecasting data but the overall trend of Cocoa price is not observed. This is an improvement on the preliminary model, but not by much, we still need to explore more options.
+
+```{r, echo = FALSE, fig.width=10, fig.height=5}
+
+arima_model <- arima(train_ts, order = c(0,2,1))
+
+arima_forecast <- forecast(arima_model, h = 1334)
+
+arima_pred <- arima_forecast$mean
+
+combined_pred <- (lm_model_pre + arima_pred) / 2
+
+two_results <- tibble(
+  Date = test_lm$Date,
+  Actual = test_lm$Price,
+  Predicted = combined_pred
+)
+
+ggplot(two_results, aes(x = Date)) +
+  geom_line(aes(y = Actual), color = "red") +
+  geom_line(aes(y = Predicted), color = "blue") +
+  labs(title = "Ensemble model Forecast vs Actual Prices", y = "Price", x = "Date") +
+  theme_minimal()
+
+```
 
 ## ARIMAX
 
@@ -212,6 +439,46 @@ grid.arrange(p1, p2, ncol = 2)
 
 
 ## Linear Regression on Lags
+```{R, include =  FALSE}
+GAM_data_lag_1 <- GAM_data_lag %>% 
+  select(Date, Price, starts_with("lag_"), avg_PRCP , avg_TAVG , avg_TMAX , avg_TMIN , Inflation , diseases , Reg_temp)
+
+train_size <- floor(0.8 * nrow(GAM_data_lag_1))
+train_lm_lag <- GAM_data_lag_1[1:train_size, ]
+test_lm_lag <- GAM_data_lag_1[(train_size + 1):nrow(GAM_data_lag_1), ]
+
+lm_model_lag <- lm(Price ~ ., 
+                   data = train_lm_lag%>%select(-Date))
+
+lm_model_lag <- lm(Price ~ lag_1 + lag_4 + lag_5, 
+                   data = train_lm_lag%>%select(-Date))
+
+lm_pre_lag <- predict(lm_model_lag, newdata = test_lm_lag, type = "response")
+
+```
+After exploring the previous 3 models, we are able to find that one of the most influential factors for Cocoa price is the Cocoa price before. With this finding in mind, we decided to add lag in price, and use it as predictors. Using the “lm” function in R and our training dataset, we are able to produce our new linear regression model. Then we use t-test and p-value to find which of the lag prices is actually significant. Turns out only lag 1(price of cocoa 1 day before our prediction day) , lag 4 and lag 5 is significant for our model.  Using lag1,2,5 we are able to produce a linear regression model on the training data set, and produce a forecast for price on the testing dataset. Below is the actual value of the Cocoa price with our predicted Cocoa price in the model. The predicted and actual price seems to be equivalent in most cases, resulting in the blue line and the red line overlapping each other. This is an indication for a very good prediction, but there is still improvement for the model since linear regression often isn’t the top choice for time sensitive data.
+
+
+```{R, echo = FALSE, fig.width=10, fig.height=5}
+
+### Plot Regression Predictions
+lm_result_lag <- tibble(
+  Date = test_lm_lag$Date,
+  Actual = test_lm_lag$Price,
+  Predicted = lm_pre_lag
+)
+
+lm_rmse <- sqrt(mean((lm_result_lag$Actual - lm_result_lag$Predicted)^2))
+
+lm_rmse
+
+ggplot(lm_result_lag, aes(x = Date)) +
+  geom_line(aes(y = Actual), color = "red") +
+  geom_line(aes(y = Predicted), color = "blue") +
+  labs(title = "Linear Regression Forecast vs Actual Prices", y = "Price", x = "Date") +
+  theme_minimal()
+
+```
 
 ## Temporal CNN
 It takes the CNN ~1000 epochs to converge to a low loss. The fitted time series on the training and test set are shown. We can see that the model performs extremely well on the training set, showing that the expressiveness of the model is sufficient to capture the training data. We can see that the trend of the time series is correctly predicted by the CNN, but there is still some deviations from the true test set. The validation MSE loss on the test set is also large. A potential reason is that the model is too complex and it overfits the given training set even though we apply a standard $L^2$ regularization  on its weights. Overly complex model may not be suitable for a time series prediction without good regularization. The loss curve is also shown below. 
